@@ -1,4 +1,5 @@
-﻿using System;
+﻿using Npgsql;
+using System;
 using System.Data.Common;
 using System.Transactions;
 
@@ -8,57 +9,22 @@ namespace npgsqlfail
     {
         static void Main(string[] args)
         {
-            // Allow the application to loop 5 times, then exit.
-            // What really happens is that we get a nested transaction error
-            // on the second iteration as it's not cleaned up correctly.
-            int i = 0;
-
-            while (i++ < 5)
+            using (var scope = new TransactionScope())
             {
-                try
+                using (var connection = CreateOpenConnection())
+                using (var command = connection.CreateCommand())
                 {
-                    using (var scope = new TransactionScope())
-                    {
-                        using (var connection = CreateOpenConnection()) { }
-
-                        try
-                        {
-                            try
-                            {
-                                using (var scope2 = new TransactionScope())
-                                {
-                                    throw new Exception("test Exception");
-                                }
-                            }
-                            catch (Exception ex)
-                            {
-                                // Required exception to trigger the nested transaction issue.
-                            }
-
-                            try
-                            {
-                                using (var connection = CreateOpenConnection()) { }
-                            }
-                            //catch (TransactionException ex)
-                            //{
-                            //   Will successfully work if you don't attempt the save and catch the transaction exception.
-                            //}
-                            catch (Exception ex)
-                            {
-                                using (var connection = CreateOpenConnection()) { }
-                            }
-                        }
-                        catch (Exception ex)
-                        {
-                            scope.Complete();
-                            continue;
-                        }
-                    }
+                    command.CommandText = "CREATE TEMP TABLE a ()";
+                    command.ExecuteNonQuery();
                 }
-                catch (System.Transactions.TransactionException e)
+
+                using (var connection = CreateOpenConnection())
+                using (var command = connection.CreateCommand())
                 {
-
+                    command.CommandText = "SELECT * FROM a";
+                    command.ExecuteNonQuery();
                 }
+                scope.Complete();
             }
         }
 
@@ -70,11 +36,13 @@ namespace npgsqlfail
             };
 
             builder["Enlist"] = true;
+            builder["Pooling"] = true;
+            builder.Remove("Provider");
 
-            var connection = Npgsql.NpgsqlFactory.Instance.CreateConnection();
-            connection.ConnectionString = builder.ConnectionString;
+            var dataSourceBuilder = new NpgsqlDataSourceBuilder(builder.ConnectionString);
+            //dataSourceBuilder.UseJsonNet();
+            var connection = dataSourceBuilder.Build().OpenConnection();
 
-            connection.Open();
             return connection;
         }
     }
